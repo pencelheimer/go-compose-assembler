@@ -1,0 +1,56 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'backend.just'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'backend.just'
+      - '.github/workflows/backend.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint, Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          diffs=$(gofmt -s -l .)
+          if [ -n "$diffs" ]; then
+            echo "Unformatted Go files found:"
+            echo "$diffs"
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests with race detector
+        run: go test -v -race ./...
+
+      - name: Build binary
+        run: go build -v -o bin/assembler ./cmd/assembler

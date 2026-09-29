@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build Release Binary
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            output: assembler-linux-amd64
+          - goos: linux
+            goarch: arm64
+            output: assembler-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            output: assembler-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            output: assembler-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            output: assembler-windows-amd64.exe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -trimpath -ldflags="-s -w" -o "${{ matrix.output }}" ./cmd/assembler
+
+      - name: Upload artifacts to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.output }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
