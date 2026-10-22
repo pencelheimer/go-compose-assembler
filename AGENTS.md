@@ -8,14 +8,14 @@ A local Go tool for assembling and customizing compose files (Compose Specificat
 
 Two modes of operation, both consumers of the same core:
 
-- CLI — interactive generation (generate), listing what's available (list), linting (lint).
+- CLI — the interactive TUI (the default command).
 - Web — the serve command starts a local HTTP server with a browser UI.
 
 ## Course requirements → where they live in the code
 
 | Lab topic | Where it is used |
 |---|---|
-| Goroutines and channels | source.Resolver.List* (fan-out over sources), validate.RunAll (fan-out/fan-in), lint --all (worker pool), optionally an SSE broadcaster in web |
+| Goroutines and channels | source.Resolver.List* (fan-out over sources), validate.RunAll (fan-out/fan-in), optionally an SSE broadcaster in web |
 | Errors and custom errors | errs — custom types, wrapping via %w, inspection via errors.Is / errors.As |
 | Panics and recover | panic for programmer errors (duplicate registrations, broken embedded content); recover in main and in the HTTP middleware |
 | Interfaces and associated functions | Source, Validator, TargetMerger, Exporter |
@@ -28,7 +28,10 @@ Two modes of operation, both consumers of the same core:
 3. Scalar parameters are normalized to strings for `.env`: whole numbers become integer digit strings, booleans become `"true"`/`"false"`, strings are kept, and numbers with fractional parts are rejected with `ParamTypeMismatchError` (prompting the user to quote the value). The engine enforces the environment collision policy: scalar parameters follow the component prefix convention; if two distinct components resolve the same `.env` key to different values, the engine halts with `EnvConflictError` (identical values are permitted). List parameters are dispatched to the matching `TargetMerger` registered for their target, and an unregistered target yields `UnknownTargetError`.
 4. The engine combines the resulting services into an in-memory `domain.Project`, merging the top-level volumes and networks declared by the components. `Project` represents domain state, not a raw Compose document.
 5. validate.RunAll runs every registered Validator against the assembled `domain.Project` in parallel and collects their errors.
+   Validators see a copy of the project with `${VAR}` references substituted from the `.env` map (only so ports etc. can be compared); the returned `Project` and the exported files keep the references and Compose does the real substitution.
 6. If validation passes, Engine.Generate returns a `domain.GenerateResult` containing the `Project`, the `.env` scalar map, and any non-fatal warnings. The frontend then calls an Exporter to render the Compose specification document (`compose.yaml`) and `.env` file bytes.
+
+A `depends_on` entry naming a service that is not part of the project is not an error: the result carries a warning (Compose will reject such a file, so the frontend should surface it).
 
 Errors from steps 2 to 5 are returned to the frontend, which decides how to present them.
 
@@ -41,7 +44,7 @@ Separation of responsibilities:
 ## Project layout
 
 ```
-cmd/assembler/main.go        — entrypoint, commands generate / serve / list / lint, top-level recover
+cmd/assembler/main.go        — entrypoint (TUI by default, `serve`), top-level recover
 
 frontend/                    — TanStack Router SPA (Vite + TypeScript)
   src/
@@ -56,15 +59,19 @@ internal/
     request.go               — GenerateRequest, ServiceSelection, GenerateResult
   errs/errors.go             — all custom error types
   source/
-    source.go                — Source interface
-    embedded.go              — EmbeddedSource (go:embed)
-    dir.go                   — DirSource (cwd / config dir)
-    resolver.go              — walks all sources, parallel List*
+    source.go                — Source interface, identifier pattern, shared fs.FS-backed implementation
+    parse.go                 — ParseComponent / ParsePreset: strict decoding and load-time validation
+    embedded.go              — EmbeddedSource (go:embed), validates all content eagerly, panics if broken
+    dir.go                   — DirSource (cwd / config dir); a missing directory behaves as empty
+    resolver.go              — ordered lookup (first match wins), parallel List*
+    catalog.go               — Catalog: implements ComponentCatalog + PresetCatalog over a Resolver
     components/*.yaml        — built-in components (postgres, redis, nginx, go-app, ...)
     presets/*.yaml           — built-in presets (web, low-level, mobile)
   assemble/
     engine.go                — Engine.Generate
-    target.go                — TargetMerger interface + registry
+    params.go                — scalar normalization, list type checks
+    subst.go                 — ${VAR} expansion used only to build the copy validators inspect
+    target.go                — TargetMerger interface + registry + shared merger helpers
     merge_ports.go           — PortsMerger (+ init registration)
     merge_volumes.go         — VolumesMerger
     merge_env.go             — EnvironmentMerger
@@ -78,7 +85,8 @@ internal/
     exporter.go              — Exporter interface
     yaml.go                  — compose YAML and .env rendering
     json.go                  — for the web API
-  cli/                       — interactive mode, list, lint (worker pool)
+  cli/                       — consumer interfaces, Deps, Run (cli.go); full-screen bubbletea session (tui.go);
+                               pure request-building helpers for it (wizard.go)
   web/
     server.go
     middleware.go            — recover middleware, logging
@@ -94,11 +102,11 @@ go:embed cannot see files above the package directory, so the built-in component
 ```go
 // source (internal to source package)
 type Source interface {
-    Name() string
-    ListComponents() ([]string, error)
-    LoadComponent(id string) ([]byte, error)   // raw YAML
-    ListPresets() ([]string, error)
-    LoadPreset(id string) ([]byte, error)
+    Name() string                                                 // "embedded" or the directory path
+    ListComponents(ctx context.Context) ([]string, error)
+    LoadComponent(ctx context.Context, id string) ([]byte, error) // raw YAML; wraps fs.ErrNotExist if absent
+    ListPresets(ctx context.Context) ([]string, error)
+    LoadPreset(ctx context.Context, id string) ([]byte, error)
 }
 
 // read-side catalog (consumed by CLI and Web)
@@ -137,6 +145,7 @@ type Exporter interface {
 
 Registries:
 
+- Engine validators — injected into `assemble.NewEngine`; nil means `validate.Default()`.
 - Source and Validator — slices (run all of them, collect the results; order doesn't matter).
 - TargetMerger — a map map[string]TargetMerger (lookup by target). Registered via RegisterTarget in init(), panics on duplicates.
 
@@ -193,7 +202,8 @@ Canonical service structure in component YAML:
 A preset only lists components and their parameter values; it does not contain ready-made compose YAML.
 
 ```yaml
-name: web-stack
+name: web
+description: Full web stack
 services:
   - component: postgres
     params: { POSTGRES_VERSION: "16", EXTRA_PORTS: ["5433:5432"] }
@@ -205,11 +215,15 @@ services:
 
 ## Source lookup
 
+Identifiers equal file names: `postgres.yaml` holds `id: postgres`, `web.yaml` holds `name: web`; a mismatch is an invalid definition. Identifiers match `[a-z0-9][a-z0-9-]{0,63}`.
+
 Priority order (first match wins: an earlier source fully replaces a later one with the same ID; definitions are never merged):
 
 1. ./assembler-presets/ — cwd, local to the project
 2. os.UserConfigDir()/assembler/ — cross-platform (Linux ~/.config, macOS ~/Library/Application Support, Windows %AppData%); do not branch manually on runtime.GOOS
 3. Embedded (go:embed) — defaults shipped in the binary
+
+Nothing is cached: every operation reads the sources on demand, so edits are picked up without a restart. A broken higher-priority file is an error and never falls back to a lower-priority definition. Listing is best-effort: it returns every valid entry plus a joined error describing what was skipped (results are usable when the error is non-nil).
 
 Each directory is expected to contain components/ and presets/ subdirectories. A failed lookup → `PresetNotFoundError` / `ComponentNotFoundError` with the list of searched locations (paths or source names). Malformed YAML files → `InvalidPresetError` / `InvalidComponentError` wrapping the parser error.
 
@@ -258,7 +272,6 @@ We recover in:
 
 - Resolver.ListComponents/ListPresets — one goroutine per source, results via a channel; aggregate without races and without leaking goroutines.
 - validate.RunAll — each Validator in its own goroutine, errors collected from a channel; use sync.WaitGroup, close the channel exactly once.
-- lint --all — a worker pool with a fixed number of workers.
 - Optional: an SSE broadcaster in web (fsnotify on the preset directories).
 - Verify with go test -race ./...
 
@@ -305,7 +318,18 @@ The contract between them is `domain.GenerateRequest`, `domain.GenerateResult`, 
 - Tests are table-driven; validate (including with -race), assemble (required params, mergers), and registration panics (recover in the test) must be covered.
 - Code, comments, and user-facing messages are in English.
 
-## Open questions (to be decided before implementation)
+## CLI decisions
 
-1. CLI library: cobra or the standard flag; for interactive prompts — survey / promptui.
-2. SSE + fsnotify: do it or not (see "Live updates (SSE, optional)" above; extra dependency, a "wow" feature for the defense).
+The binary has no argument parsing beyond one word:
+
+- `assembler` (no arguments) — the full-screen interactive session (bubbletea + huh). Needs a terminal.
+- `assembler serve` — starts the web server (Person B; until `Deps.Serve` is wired it reports "not implemented yet").
+- Anything else is a usage error (exit 2). No flags, no cobra.
+
+The session is one alt-screen program: choose preset or components, edit parameters (one huh form group per component, shift+tab walks back, secrets are masked), generate, scrollable preview (`c` compose / `e` .env), write. On an input or conflict error it shows the message and returns to the parameters with every value kept. Output goes to the current directory; existing `compose.yaml` / `.env` are only replaced after the user confirms. `.env` is written with mode 0600. The TUI receives its services through `cli.Session` and contains no business logic.
+
+Exit codes follow the category sentinels: 2 invalid input, 3 not found, 4 invalid definition, 5 conflict, 130 aborted, 1 anything else, 70 recovered panic.
+
+## Open questions
+
+1. SSE + fsnotify: do it or not (see "Live updates (SSE, optional)" above; extra dependency, a "wow" feature for the defense).

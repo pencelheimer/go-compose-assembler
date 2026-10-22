@@ -1,0 +1,37 @@
+id: postgres
+description: PostgreSQL relational database
+params:
+  - name: POSTGRES_PASSWORD
+    type: scalar
+    required: true
+    description: Database superuser password
+  - name: POSTGRES_VERSION
+    type: scalar
+    required: false
+    default: "16"
+    description: PostgreSQL major version tag
+  - name: POSTGRES_PORT
+    type: scalar
+    required: false
+    default: "5432"
+    description: Host port mapped to PostgreSQL
+  - name: POSTGRES_EXTRA_PORTS
+    type: list
+    required: false
+    target: ports
+    description: Additional host:container port mappings
+service:
+  image: "postgres:${POSTGRES_VERSION}"
+  ports:
+    - "${POSTGRES_PORT}:5432"
+  environment:
+    POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+  volumes:
+    - "pgdata:/var/lib/postgresql/data"
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+volumes:
+  - name: pgdata

@@ -1,0 +1,13 @@
+name: mobile
+description: Backend services for mobile application development
+services:
+  - component: postgres
+    params:
+      POSTGRES_PORT: "5434"
+  - component: redis
+    params:
+      REDIS_VERSION: "7"
+  - component: go-app
+    params:
+      GO_APP_PORT: "3000"
+      GO_APP_IMAGE: "mobile-api:latest"

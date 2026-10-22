@@ -1,0 +1,21 @@
+id: redis
+description: Redis in-memory data store
+params:
+  - name: REDIS_PORT
+    type: scalar
+    required: false
+    default: "6379"
+    description: Host port mapped to Redis
+  - name: REDIS_VERSION
+    type: scalar
+    required: false
+    default: "7"
+    description: Redis major version tag
+service:
+  image: "redis:${REDIS_VERSION}"
+  ports:
+    - "${REDIS_PORT}:6379"
+  volumes:
+    - "redisdata:/data"
+volumes:
+  - name: redisdata

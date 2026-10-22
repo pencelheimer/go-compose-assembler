@@ -16,7 +16,7 @@ func (m mockMerger) Target() string                             { return m.targe
 func (m mockMerger) Merge(svc *domain.Service, value any) error { return nil }
 
 func TestRegisterAndGetTarget(t *testing.T) {
-	assemble.ResetRegistry()
+	t.Cleanup(assemble.SwapRegistry())
 
 	assemble.RegisterTarget(mockMerger{target: "ports"})
 
@@ -30,11 +30,10 @@ func TestRegisterAndGetTarget(t *testing.T) {
 		t.Fatalf("expected GetTarget(\"nonexistent\") to be nil, got %v", got)
 	}
 
-	assemble.ResetRegistry()
 }
 
 func TestRegisterDuplicatePanics(t *testing.T) {
-	assemble.ResetRegistry()
+	t.Cleanup(assemble.SwapRegistry())
 
 	assemble.RegisterTarget(mockMerger{target: "volumes"})
 
@@ -50,26 +49,9 @@ func TestRegisterDuplicatePanics(t *testing.T) {
 		if !strings.Contains(msg, "duplicate") {
 			t.Fatalf("expected panic message to contain \"duplicate\", got %q", msg)
 		}
-		assemble.ResetRegistry()
 	}()
 
 	assemble.RegisterTarget(mockMerger{target: "volumes"})
 
 	t.Fatal("expected panic on duplicate registration")
-}
-
-func TestResetRegistry(t *testing.T) {
-	assemble.ResetRegistry()
-
-	assemble.RegisterTarget(mockMerger{target: "test"})
-
-	if got := assemble.GetTarget("test"); got == nil {
-		t.Fatal("expected GetTarget(\"test\") to be non-nil after registration")
-	}
-
-	assemble.ResetRegistry()
-
-	if got := assemble.GetTarget("test"); got != nil {
-		t.Fatalf("expected GetTarget(\"test\") to be nil after ResetRegistry, got %v", got)
-	}
 }

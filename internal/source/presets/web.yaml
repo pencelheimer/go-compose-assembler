@@ -1,0 +1,15 @@
+name: web
+description: Full web stack with database, reverse proxy, and application
+services:
+  - component: postgres
+    params:
+      POSTGRES_VERSION: "16"
+      POSTGRES_EXTRA_PORTS:
+        - "5433:5432"
+  - component: nginx
+    params:
+      NGINX_HTTP_PORT: "80"
+  - component: go-app
+    params:
+      GO_APP_PORT: "8080"
+      GO_APP_IMAGE: "myapp:latest"

@@ -1,0 +1,27 @@
+id: nginx
+description: Nginx reverse proxy and web server
+params:
+  - name: NGINX_HTTP_PORT
+    type: scalar
+    required: false
+    default: "80"
+    description: Host port mapped to HTTP
+  - name: NGINX_HTTPS_PORT
+    type: scalar
+    required: false
+    default: "443"
+    description: Host port mapped to HTTPS
+  - name: NGINX_VERSION
+    type: scalar
+    required: false
+    default: "1.27"
+    description: Nginx version tag
+service:
+  image: "nginx:${NGINX_VERSION}"
+  ports:
+    - "${NGINX_HTTP_PORT}:80"
+    - "${NGINX_HTTPS_PORT}:443"
+  networks:
+    - webnet
+networks:
+  - name: webnet

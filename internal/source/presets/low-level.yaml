@@ -1,0 +1,9 @@
+name: low-level
+description: Infrastructure services for low-level development
+services:
+  - component: postgres
+    params:
+      POSTGRES_PORT: "5433"
+  - component: redis
+    params:
+      REDIS_PORT: "6380"

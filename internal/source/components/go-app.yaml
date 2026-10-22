@@ -1,0 +1,23 @@
+id: go-app
+description: Go application container
+params:
+  - name: GO_APP_PORT
+    type: scalar
+    required: true
+    description: Host port mapped to the application
+  - name: GO_APP_IMAGE
+    type: scalar
+    required: true
+    description: Docker image for the Go application
+service:
+  image: "${GO_APP_IMAGE}"
+  ports:
+    - "${GO_APP_PORT}:8080"
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks:
+    - webnet
+  restart: unless-stopped
+networks:
+  - name: webnet
