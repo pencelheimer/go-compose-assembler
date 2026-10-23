@@ -13,7 +13,8 @@ import (
 const maxRequestBody = 1 << 20
 
 type handlers struct {
-	d Deps
+	d   Deps
+	hub *broadcaster // nil when live updates are off
 }
 
 // listResponse is a best-effort catalog listing: every valid entry plus a

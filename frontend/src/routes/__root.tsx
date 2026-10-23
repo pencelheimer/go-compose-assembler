@@ -1,6 +1,8 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { createRootRouteWithContext, Link, Outlet, useRouterState } from '@tanstack/react-router'
-import { Monitor, Moon, Sun } from 'lucide-react'
+import { Monitor, Moon, RefreshCw, Sun } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useLiveUpdates, type Changed, type LiveStatus } from '@/lib/live'
 import { useTheme } from '@/lib/theme'
 import { builderSearch } from '@/lib/useUrlValues'
 
@@ -45,9 +47,38 @@ function ThemeToggle() {
   )
 }
 
+const liveText: Record<LiveStatus, { label: string; title: string }> = {
+  live: { label: 'Live', title: 'Watching definition files: edits on disk show up here immediately' },
+  connecting: { label: 'Reconnecting', title: 'Lost the connection to the server; retrying' },
+  offline: { label: 'Offline', title: 'Live updates are unavailable; switching back to this tab still refreshes' },
+}
+
+function LiveIndicator({ status }: { status: LiveStatus }) {
+  return (
+    <span className="live" data-status={status} title={liveText[status].title} role="status">
+      <span className="live-dot" aria-hidden />
+      {liveText[status].label}
+    </span>
+  )
+}
+
+function useNotice() {
+  const [notice, setNotice] = useState<{ text: string; key: number }>()
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(undefined), 3500)
+    return () => clearTimeout(t)
+  }, [notice])
+  const show = (what: Changed) =>
+    setNotice({ text: `${what === 'components' ? 'Components' : 'Presets'} changed on disk — refreshed`, key: Date.now() })
+  return { notice, show }
+}
+
 function RootLayout() {
   // Re-render on navigation so the builder link carries its latest state.
   useRouterState({ select: (s) => s.location.pathname })
+  const { notice, show } = useNotice()
+  const live = useLiveUpdates(show)
 
   return (
     <div className="app">
@@ -63,9 +94,15 @@ function RootLayout() {
           <Link to="/catalog">Catalog</Link>
         </nav>
         <span className="spacer" />
+        <LiveIndicator status={live} />
         <ThemeToggle />
       </header>
       <Outlet />
+      {notice && (
+        <div key={notice.key} className="toast" role="status">
+          <RefreshCw size={14} aria-hidden /> {notice.text}
+        </div>
+      )}
     </div>
   )
 }

@@ -13,6 +13,9 @@ type statusRecorder struct {
 	status int
 }
 
+// Unwrap lets http.ResponseController reach the connection (Flush for SSE).
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
 func (r *statusRecorder) WriteHeader(code int) {
 	if r.status == 0 {
 		r.status = code

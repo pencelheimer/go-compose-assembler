@@ -23,30 +23,30 @@ func NewResolver(sources ...Source) *Resolver {
 	return &Resolver{sources: sources}
 }
 
-// NewDefaultResolver builds the standard three-source priority order:
+// DefaultDirs returns the directory sources in priority order:
 //  1. ./assembler-presets/ (current working directory)
 //  2. <user-config-dir>/assembler/
-//  3. embedded defaults
 //
-// If the user configuration directory cannot be determined, that source is omitted.
+// A directory whose location cannot be determined is omitted.
+func DefaultDirs() []string {
+	var dirs []string
+	if cwd, err := os.Getwd(); err == nil {
+		dirs = append(dirs, filepath.Join(cwd, "assembler-presets"))
+	}
+	if configDir, err := os.UserConfigDir(); err == nil {
+		dirs = append(dirs, filepath.Join(configDir, "assembler"))
+	}
+	return dirs
+}
+
+// NewDefaultResolver builds the standard priority order: the DefaultDirs,
+// then the embedded defaults.
 func NewDefaultResolver() *Resolver {
 	var sources []Source
-
-	// 1. CWD overrides.
-	cwd, err := os.Getwd()
-	if err == nil {
-		sources = append(sources, NewDirSource(filepath.Join(cwd, "assembler-presets")))
+	for _, dir := range DefaultDirs() {
+		sources = append(sources, NewDirSource(dir))
 	}
-
-	// 2. User config dir.
-	configDir, err := os.UserConfigDir()
-	if err == nil {
-		sources = append(sources, NewDirSource(filepath.Join(configDir, "assembler")))
-	}
-
-	// 3. Embedded.
 	sources = append(sources, NewEmbeddedSource())
-
 	return NewResolver(sources...)
 }
 

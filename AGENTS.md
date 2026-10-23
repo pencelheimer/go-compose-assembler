@@ -15,7 +15,7 @@ Two modes of operation, both consumers of the same core:
 
 | Lab topic | Where it is used |
 |---|---|
-| Goroutines and channels | source.Resolver.List* (fan-out over sources), validate.RunAll (fan-out/fan-in), optionally an SSE broadcaster in web |
+| Goroutines and channels | source.Resolver.List* (fan-out over sources), validate.RunAll (fan-out/fan-in), the SSE broadcaster and file watcher in web |
 | Errors and custom errors | errs — custom types, wrapping via %w, inspection via errors.Is / errors.As |
 | Panics and recover | panic for programmer errors (duplicate registrations, broken embedded content); recover in main and in the HTTP middleware |
 | Interfaces and associated functions | Source, Validator, TargetMerger, Exporter |
@@ -93,7 +93,8 @@ internal/
     handlers.go
     errors.go                — error → HTTP status + structured details
     static.go                — embedded SPA serving with index.html fallback
-    sse.go                   — optional
+    sse.go                   — live updates: broadcaster goroutine + GET /api/events stream
+    watch.go                 — fsnotify watcher on the directory sources
     static/                  — SPA build output (Vite writes here; only .gitkeep is tracked)
 ```
 
@@ -274,7 +275,7 @@ We recover in:
 
 - Resolver.ListComponents/ListPresets — one goroutine per source, results via a channel; aggregate without races and without leaking goroutines.
 - validate.RunAll — each Validator in its own goroutine, errors collected from a channel; use sync.WaitGroup, close the channel exactly once.
-- Optional: an SSE broadcaster in web (fsnotify on the preset directories).
+- web: an SSE broadcaster and an fsnotify watcher on the preset directories (see Live updates).
 - Verify with go test -race ./...
 
 ## Web API (initial set)
@@ -285,7 +286,7 @@ GET  /api/components/{id}          — ComponentDef (params drive the UI forms)
 GET  /api/presets                  — list presets: {items, skipped}
 GET  /api/presets/{id}             — Preset (values pre-fill the forms)
 POST /api/generate                 — body: GenerateRequest, response: {compose, env, warnings}
-GET  /api/events                   — SSE (optional)
+GET  /api/events                   — SSE: components_changed / presets_changed
 ```
 
 Listings are best-effort like the catalog: `skipped` describes files that failed to load. Every non-2xx response is `{kind, message, details[]}`: `kind` comes from the category sentinel (`invalid_input` 400, `not_found` 404, `conflict` 409, `invalid_definition` / `internal` 500), and `details` has one entry per underlying error (joined validator errors are split) with the typed fields the UI needs to point at a service or parameter (`component`, `param`, `services`, `value`, `chain`, `location`).
@@ -294,13 +295,15 @@ Listings are best-effort like the catalog: `skipped` describes files that failed
 
 The web frontend is a client-side SPA using TanStack Router (SPA mode, without SSR). The Go server serves the compiled static assets from `static/` alongside the REST API. Handlers are thin: parse the request → Engine.Generate → respond.
 
-## Live updates (SSE, optional)
+## Live updates (SSE)
 
 SSE is a one-way push channel (server → browser) over a long-lived HTTP response. The browser still uses fetch for all actions; SSE only tells it that something changed.
 
 - Scope: web layer only. The core (source, assemble, validate, export) knows nothing about SSE or HTTP.
 - Event source: a watcher goroutine (fsnotify) on the directory-based sources (cwd and user config dir). Embedded sources never change. When a component or preset file is created, changed, or removed, the watcher emits an event such as components_changed / presets_changed, and the browser refetches GET /api/components or GET /api/presets.
 - Broadcaster: one goroutine owns the set of subscribers; each connected browser gets its own buffered channel, and register / unregister / broadcast go through channels (no shared map behind a mutex). Drop slow clients instead of blocking the broadcaster, and clean up when the request context is cancelled.
+- Lifecycle: `web.Serve` runs the broadcaster and the watcher for the directories in `Deps.WatchDirs` (`source.DefaultDirs()` in main). A directory that does not exist yet is retried every 2 s and its appearance counts as a change; bursts of editor writes are coalesced. `NewHandler` alone has no `/api/events` (it starts no goroutines). Cancelling Serve's context ends every stream, so shutdown does not wait on them.
+- Browser: an `EventSource` invalidates the matching TanStack Query keys (and the current generation); after a reconnect everything is refetched, since events may have been missed.
 
 ## Division of work
 
@@ -340,4 +343,4 @@ Exit codes follow the category sentinels: 2 invalid input, 3 not found, 4 invali
 
 ## Open questions
 
-1. SSE + fsnotify: do it or not (see "Live updates (SSE, optional)" above; extra dependency, a "wow" feature for the defense).
+None at the moment.

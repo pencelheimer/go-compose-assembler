@@ -76,7 +76,8 @@ function Builder() {
   const entries: StackEntry[] = []
   defs.forEach((q, i) => {
     const id = stackIds[i]!
-    if (q.data) entries.push({ id, def: q.data, presetParams: preset?.services.find((s) => s.component === id)?.params })
+    // A failed refetch keeps the old data; a definition that errored is gone.
+    if (q.data && !q.error) entries.push({ id, def: q.data, presetParams: preset?.services.find((s) => s.component === id)?.params })
   })
   const defErrors = defs.flatMap((q) => (q.error ? apiDetails(q.error) : []))
   const allLoaded = entries.length === stackIds.length && (!isPreset || Boolean(preset))
@@ -263,7 +264,25 @@ function Builder() {
           {stackIds.map((id, i) => {
             const entry = entries.find((e) => e.id === id)
             if (!entry) {
-              return defs[i]?.error ? null : <div key={id} className="card skeleton" aria-busy="true" />
+              const error = defs[i]?.error
+              if (!error) return <div key={id} className="card skeleton" aria-busy="true" />
+              const gone = error instanceof ApiError && error.status === 404
+              return (
+                <article key={id} className="card service unavailable" data-status="error">
+                  <div className="service-head">
+                    <span className="status-dot" data-status="error" aria-hidden />
+                    <span className="service-title">
+                      <span className="mono service-name">{id}</span>
+                      <span className="service-desc">
+                        {gone ? 'No longer available — its file was removed or renamed' : error.message}
+                      </span>
+                    </span>
+                    <button type="button" className="btn ghost sm" onClick={() => removeComponent(id)}>
+                      Remove
+                    </button>
+                  </div>
+                </article>
+              )
             }
             return (
               <ServiceCard

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/pencelheimer/go-compose-assembler/internal/domain"
@@ -50,6 +51,19 @@ type Deps struct {
 	Logger *slog.Logger
 	// Assets holds the built SPA; nil means the assets embedded in the binary.
 	Assets fs.FS
+	// WatchDirs are the directory sources Serve watches for live updates
+	// (GET /api/events); empty disables watching.
+	WatchDirs []string
+}
+
+func (d Deps) withDefaults() Deps {
+	if d.Logger == nil {
+		d.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	if d.Assets == nil {
+		d.Assets = embeddedAssets()
+	}
+	return d
 }
 
 //go:embed all:static
@@ -64,15 +78,14 @@ func embeddedAssets() fs.FS {
 }
 
 // NewHandler builds the HTTP handler: the API under /api/ and the SPA for
-// every other path, wrapped in logging and panic recovery.
+// every other path, wrapped in logging and panic recovery. Live updates need
+// background goroutines and are only available through Serve.
 func NewHandler(d Deps) http.Handler {
-	if d.Logger == nil {
-		d.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	}
-	if d.Assets == nil {
-		d.Assets = embeddedAssets()
-	}
-	h := &handlers{d: d}
+	return newHandler(d.withDefaults(), nil)
+}
+
+func newHandler(d Deps, events *broadcaster) http.Handler {
+	h := &handlers{d: d, hub: events}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/components", h.listComponents)
@@ -80,6 +93,9 @@ func NewHandler(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/presets", h.listPresets)
 	mux.HandleFunc("GET /api/presets/{id}", h.getPreset)
 	mux.HandleFunc("POST /api/generate", h.generate)
+	if events != nil {
+		mux.HandleFunc("GET /api/events", h.events)
+	}
 	mux.HandleFunc("/api/", h.apiNotFound)
 	mux.Handle("/", spaHandler(d.Assets))
 
@@ -87,15 +103,36 @@ func NewHandler(d Deps) http.Handler {
 }
 
 // Serve listens on addr and serves until ctx is cancelled, then shuts down
-// gracefully. The URL it listens on is written to out.
+// gracefully. It also runs the live-update broadcaster and the file watcher.
+// The URL it listens on is written to out.
 func Serve(ctx context.Context, addr string, d Deps, out io.Writer) error {
+	d = d.withDefaults()
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
+
+	// Cancelling ctx also cancels every request context, so long-lived event
+	// streams end and Shutdown does not wait for them.
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	events := newBroadcaster()
+	wg.Go(func() { events.run(ctx) })
+	if len(d.WatchDirs) > 0 {
+		wg.Go(func() {
+			if err := watchSources(ctx, d.WatchDirs, events.publish, d.Logger); err != nil {
+				d.Logger.Warn("live updates disabled", "err", err)
+			}
+		})
+	}
+
 	srv := &http.Server{
-		Handler:           NewHandler(d),
+		Handler:           newHandler(d, events),
 		ReadHeaderTimeout: 5 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 	fmt.Fprintf(out, "serving on http://%s (ctrl+c to stop)\n", ln.Addr())
 

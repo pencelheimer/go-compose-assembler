@@ -53,6 +53,7 @@ func main() {
 				Generator:  engine,
 				Exporter:   export.YAMLExporter{},
 				Logger:     slog.New(slog.NewTextHandler(os.Stderr, nil)),
+				WatchDirs:  source.DefaultDirs(),
 			}, os.Stdout)
 		},
 	}

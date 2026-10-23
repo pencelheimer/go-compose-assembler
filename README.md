@@ -17,6 +17,8 @@ just run              # interactive terminal UI
 just run serve        # web UI on http://127.0.0.1:8080 (ASSEMBLER_ADDR overrides)
 ```
 
+The web UI updates live: creating, editing or deleting a file under `./assembler-presets/` or the user config directory shows up in the open browser tab without a reload.
+
 The web UI is embedded into the binary at build time, so run `just build` (frontend bundle, then Go binary) for a release build. During frontend work, run `just run serve` and `just frontend dev` side by side: Vite serves the SPA with hot reload and proxies `/api` to the Go server.
 
 ### Common Commands
