@@ -10,6 +10,15 @@ Use `just` to list available recipes and modules:
 just
 ```
 
+### Running
+
+```bash
+just run              # interactive terminal UI
+just run serve        # web UI on http://127.0.0.1:8080 (ASSEMBLER_ADDR overrides)
+```
+
+The web UI is embedded into the binary at build time, so run `just build` (frontend bundle, then Go binary) for a release build. During frontend work, run `just run serve` and `just frontend dev` side by side: Vite serves the SPA with hot reload and proxies `/api` to the Go server.
+
 ### Common Commands
 
 ```bash
@@ -24,6 +33,6 @@ just frontend dev     # Start Vite development server
 just frontend build   # Build SPA production bundle
 
 # Full build and cleanup
-just build-all        # Build frontend bundle + Go binary
+just build            # Build frontend bundle + Go binary
 just clean            # Clean all build outputs
 ```

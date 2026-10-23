@@ -88,11 +88,13 @@ internal/
   cli/                       — consumer interfaces, Deps, Run (cli.go); full-screen bubbletea session (tui.go);
                                pure request-building helpers for it (wizard.go)
   web/
-    server.go
+    server.go                — consumer interfaces, Deps, NewHandler (routes), Serve (graceful shutdown)
     middleware.go            — recover middleware, logging
     handlers.go
+    errors.go                — error → HTTP status + structured details
+    static.go                — embedded SPA serving with index.html fallback
     sse.go                   — optional
-    static/                  — SPA assets (index.html, JS, CSS)
+    static/                  — SPA build output (Vite writes here; only .gitkeep is tracked)
 ```
 
 go:embed cannot see files above the package directory, so the built-in components/ and presets/ live inside internal/source/.
@@ -278,11 +280,17 @@ We recover in:
 ## Web API (initial set)
 
 ```
-GET  /api/components               — list available components
-GET  /api/presets                  — list presets
-POST /api/generate                 — body: GenerateRequest, response: compose YAML + .env
+GET  /api/components               — list available components: {items, skipped}
+GET  /api/components/{id}          — ComponentDef (params drive the UI forms)
+GET  /api/presets                  — list presets: {items, skipped}
+GET  /api/presets/{id}             — Preset (values pre-fill the forms)
+POST /api/generate                 — body: GenerateRequest, response: {compose, env, warnings}
 GET  /api/events                   — SSE (optional)
 ```
+
+Listings are best-effort like the catalog: `skipped` describes files that failed to load. Every non-2xx response is `{kind, message, details[]}`: `kind` comes from the category sentinel (`invalid_input` 400, `not_found` 404, `conflict` 409, `invalid_definition` / `internal` 500), and `details` has one entry per underlying error (joined validator errors are split) with the typed fields the UI needs to point at a service or parameter (`component`, `param`, `services`, `value`, `chain`, `location`).
+
+`assembler serve` listens on 127.0.0.1:8080 (loopback only, the API is unauthenticated); the `ASSEMBLER_ADDR` environment variable overrides the address.
 
 The web frontend is a client-side SPA using TanStack Router (SPA mode, without SSR). The Go server serves the compiled static assets from `static/` alongside the REST API. Handlers are thin: parse the request → Engine.Generate → respond.
 
@@ -323,7 +331,7 @@ The contract between them is `domain.GenerateRequest`, `domain.GenerateResult`, 
 The binary has no argument parsing beyond one word:
 
 - `assembler` (no arguments) — the full-screen interactive session (bubbletea + huh). Needs a terminal.
-- `assembler serve` — starts the web server (Person B; until `Deps.Serve` is wired it reports "not implemented yet").
+- `assembler serve` — starts the web server and the browser UI (see Web API).
 - Anything else is a usage error (exit 2). No flags, no cobra.
 
 The session is one alt-screen program: choose preset or components, edit parameters (one huh form group per component, shift+tab walks back, secrets are masked), generate, scrollable preview (`c` compose / `e` .env), write. On an input or conflict error it shows the message and returns to the parameters with every value kept. Output goes to the current directory; existing `compose.yaml` / `.env` are only replaced after the user confirms. `.env` is written with mode 0600. The TUI receives its services through `cli.Session` and contains no business logic.
