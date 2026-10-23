@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { createRootRouteWithContext, Link, Outlet, useRouterState } from '@tanstack/react-router'
-import { Monitor, Moon, RefreshCw, Sun } from 'lucide-react'
+import { Moon, RefreshCw, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useLiveUpdates, type Changed, type LiveStatus } from '@/lib/live'
 import { useTheme } from '@/lib/theme'
@@ -37,12 +37,12 @@ function Logo() {
 }
 
 function ThemeToggle() {
-  const { pref, cycle } = useTheme()
-  const Icon = pref === 'light' ? Sun : pref === 'dark' ? Moon : Monitor
+  const { theme, toggle } = useTheme()
+  const next = theme === 'dark' ? 'light' : 'dark'
   return (
-    <button type="button" className="icon-btn" onClick={cycle} title={`Theme: ${pref} (click to change)`}>
-      <Icon size={16} />
-      <span className="sr-only">Theme: {pref}</span>
+    <button type="button" className="icon-btn" onClick={toggle} title={`Switch to ${next} theme`}>
+      {theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />}
+      <span className="sr-only">Switch to {next} theme</span>
     </button>
   )
 }

@@ -1,30 +1,24 @@
 import { useEffect, useState } from 'react'
 
-export type ThemePref = 'system' | 'light' | 'dark'
+export type Theme = 'light' | 'dark'
 
-function read(): ThemePref {
-  try {
-    const t = localStorage.getItem('theme')
-    return t === 'light' || t === 'dark' ? t : 'system'
-  } catch {
-    return 'system'
-  }
-}
+// index.html sets data-theme before first paint (saved choice, else system).
+const current = (): Theme => (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light')
 
-/** The theme preference, applied as data-theme on <html> (see index.html). */
+/** The active theme; toggling saves the choice for later visits. */
 export function useTheme() {
-  const [pref, setPref] = useState<ThemePref>(read)
+  const [theme, setTheme] = useState<Theme>(current)
   useEffect(() => {
-    const root = document.documentElement
-    if (pref === 'system') delete root.dataset.theme
-    else root.dataset.theme = pref
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+  const toggle = () => {
+    const next = theme === 'dark' ? 'light' : 'dark'
     try {
-      if (pref === 'system') localStorage.removeItem('theme')
-      else localStorage.setItem('theme', pref)
+      localStorage.setItem('theme', next)
     } catch {
       // storage unavailable: the choice lasts for this page only
     }
-  }, [pref])
-  const cycle = () => setPref((p) => (p === 'system' ? 'light' : p === 'light' ? 'dark' : 'system'))
-  return { pref, cycle }
+    setTheme(next)
+  }
+  return { theme, toggle }
 }
