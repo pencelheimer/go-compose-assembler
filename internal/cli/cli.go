@@ -73,7 +73,7 @@ type Deps struct {
 	IsTerminal func() bool
 	// TUI runs the full-screen session and returns the written paths.
 	TUI func(ctx context.Context, s Session) ([]string, error)
-	// Serve starts the web server; nil until the web layer exists.
+	// Serve starts the web server and blocks until ctx is cancelled.
 	Serve func(ctx context.Context) error
 }
 
